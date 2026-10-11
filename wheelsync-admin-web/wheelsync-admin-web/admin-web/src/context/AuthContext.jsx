@@ -64,13 +64,22 @@ export function AuthProvider({ children }) {
     }
   }
 
+  async function resendVerification(email) {
+    try {
+      const data = await api.post('/auth/resend-verification', { email: email.trim().toLowerCase() })
+      return { data }
+    } catch (error) {
+      return { error }
+    }
+  }
+
   async function signOut() {
     clearSession()
   }
 
   return (
     <AuthContext.Provider
-      value={{ session, profile, loading, signInWithPassword, signUpAdmin, signOut }}
+      value={{ session, profile, loading, signInWithPassword, signUpAdmin, resendVerification, signOut }}
     >
       {children}
     </AuthContext.Provider>

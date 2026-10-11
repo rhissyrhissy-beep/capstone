@@ -62,6 +62,25 @@ def send_notification_email(recipient: str, subject: str, text: str) -> str:
     return recipient
 
 
+def send_verification_email(recipient: str, token: str) -> str:
+    """Send the account activation link through the configured SMTP or Resend provider."""
+    settings = get_settings()
+    activation_url = f"{settings.public_base_url.rstrip('/')}/auth/verify-email?token={token}"
+    text = (
+        "Welcome to Pardz Car Rental.\n\n"
+        "Activate your WheelSync account by opening this link:\n"
+        f"{activation_url}\n\n"
+        "This link expires in 24 hours. If you did not create this account, you can ignore this email."
+    )
+    html = (
+        "<p>Welcome to Pardz Car Rental.</p>"
+        f'<p><a href="{escape(activation_url, quote=True)}">Activate your WheelSync account</a></p>'
+        "<p>This link expires in 24 hours. If you did not create this account, you can ignore this email.</p>"
+    )
+    _deliver_email(recipient, "Activate your WheelSync account", text, html)
+    return recipient
+
+
 def send_booking_approved_email(booking: Booking) -> str:
     """Send the booking approval email through configured SMTP or Resend."""
     settings = get_settings()

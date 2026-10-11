@@ -30,6 +30,9 @@ def init_db() -> None:
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
         conn.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS address text")
+        conn.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email_verified boolean NOT NULL DEFAULT true")
+        conn.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email_verification_token_hash varchar(64)")
+        conn.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email_verification_expires_at timestamp with time zone")
         conn.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS extra_document_1_path text")
         conn.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS extra_document_2_path text")
         conn.exec_driver_sql("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rejection_reason text")

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Printer } from 'lucide-react'
 import { api } from '../lib/api'
+import { subscribe } from '../lib/realtime'
 import Layout from '../components/Layout'
 import { buildChurnFeatures, predictChurn } from '../lib/churnModel'
 import { printCustomerDocuments } from '../lib/print'
@@ -15,6 +16,7 @@ export default function Customers() {
   const [rejectionReason, setRejectionReason] = useState('')
   const [verificationError, setVerificationError] = useState('')
   const [savingVerification, setSavingVerification] = useState(false)
+  const [needsReviewOnly, setNeedsReviewOnly] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -34,7 +36,15 @@ export default function Customers() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    return subscribe('notifications', load)
+  }, [])
+
+  const pendingReviews = customers.filter((customer) => customer.verification_status === 'pending').length
+  const visibleCustomers = needsReviewOnly
+    ? customers.filter((customer) => customer.verification_status === 'pending')
+    : customers
 
   async function toggleBlacklist(id, current) {
     try {
@@ -98,6 +108,20 @@ export default function Customers() {
         Customer history and churn-risk signals calculated from completed rentals.
       </p>
 
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          {pendingReviews} customer{pendingReviews === 1 ? '' : 's'} waiting for requirements review
+        </p>
+        <button
+          type="button"
+          aria-pressed={needsReviewOnly}
+          onClick={() => setNeedsReviewOnly((current) => !current)}
+          className="btn-ghost px-3 py-2 text-sm"
+        >
+          {needsReviewOnly ? 'Show all customers' : 'Show customers needing review'}
+        </button>
+      </div>
+
       {loading ? (
         <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
       ) : (
@@ -115,7 +139,7 @@ export default function Customers() {
               </tr>
             </thead>
             <tbody>
-              {customers.map((c) => (
+              {visibleCustomers.map((c) => (
                 <tr key={c.id} style={{ borderTop: '1px solid var(--border-soft)' }}>
                   <td className="py-3 px-5"><button onClick={() => openCustomer(c)} className="font-medium hover:underline" style={{ color: 'var(--nebula-3)' }}>{c.full_name}</button></td>
                   <td className="py-3 px-5">{c.email}</td>
@@ -151,8 +175,8 @@ export default function Customers() {
                   </td>
                 </tr>
               ))}
-              {customers.length === 0 && (
-                <tr><td colSpan={7} className="py-8 text-center" style={{ color: 'var(--text-muted)' }}>No customers yet.</td></tr>
+              {visibleCustomers.length === 0 && (
+                <tr><td colSpan={7} className="py-8 text-center" style={{ color: 'var(--text-muted)' }}>{needsReviewOnly ? 'No customer requirements are waiting for review.' : 'No customers yet.'}</td></tr>
               )}
             </tbody>
           </table>
@@ -179,6 +203,11 @@ export default function Customers() {
               <div className="card p-3"><p className="text-xs" style={{ color: 'var(--text-muted)' }}>Second ID</p><p className="font-medium mt-1">{selectedCustomer.second_id_type || 'Not provided'}</p><p className="text-sm">{selectedCustomer.second_id_number || 'No number'}</p></div>
               <div className="card p-3"><p className="text-xs" style={{ color: 'var(--text-muted)' }}>Verification status</p><span className={`badge mt-2 ${selectedCustomer.verification_status === 'verified' ? 'badge-accepted' : selectedCustomer.verification_status === 'rejected' ? 'badge-rejected' : 'badge-pending'}`}>{selectedCustomer.verification_status}</span></div>
             </div>
+            {selectedCustomer.verification_notes && (
+              <p className="mb-5 rounded-lg px-3 py-2 text-sm" style={{ background: 'rgba(251,113,133,0.12)', color: 'var(--danger)' }}>
+                Last rejection note: {selectedCustomer.verification_notes}
+              </p>
+            )}
             <h3 className="font-display font-semibold mb-3">Submitted documents</h3>
             {documentLoading ? <p className="py-8 text-center" style={{ color: 'var(--text-muted)' }}>Loading documents…</p> : (
               <div className="grid sm:grid-cols-2 gap-3">

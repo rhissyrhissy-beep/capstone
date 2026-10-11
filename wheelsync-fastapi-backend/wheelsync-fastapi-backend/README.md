@@ -48,7 +48,8 @@ python -m scripts.create_admin "Juan Dela Cruz" admin@pardzcarrental.com 'a-stro
 ```
 
 Set `ALLOW_ADMIN_SIGNUP=false` to disable the web route entirely. Staff accounts are made by an admin
-(Staff page). Customers self-register.
+(Staff page). Customers self-register. Admin/customer self-signups must activate their email before
+they can sign in; configure SMTP (or the optional Resend provider) first.
 
 ## Tests
 
@@ -58,7 +59,7 @@ pip install -r requirements-dev.txt
 DATABASE_URL=postgresql+psycopg2://user:pass@localhost:5432/wheelsync_test pytest
 ```
 
-The suite (20 tests) runs against a real PostgreSQL: auth + portals, role isolation, the full
+The suite (22 tests) runs against a real PostgreSQL: auth + portals, email activation, role isolation, the full
 pending → accepted → ongoing → completed lifecycle, overlap protection, verification + signed
 document links, notifications, email, and WebSocket events. **It drops and recreates all tables in
 that database — never point it at real data.**
@@ -73,21 +74,25 @@ See `.env.example`. The ones that matter:
 * `PUBLIC_BASE_URL` – the address **browsers** use to reach this API. It is embedded in vehicle-image
   URLs and document links, so set it to your public HTTPS URL when deployed.
 * `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS`, and
-  `SMTP_SSL` – approval, rejection, and new-requirements emails. SMTP is preferred when `SMTP_HOST` and
+  `SMTP_SSL` – account activation and booking emails. SMTP is preferred when `SMTP_HOST` and
   `SMTP_FROM` are set. Port `587` normally uses STARTTLS; port `465` normally uses implicit TLS
   (`SMTP_SSL=true`, `SMTP_STARTTLS=false`). Keep credentials in `.env`, never in source control.
   For Gmail, use `smtp.gmail.com` and a Google app password (not the normal account password).
-  `RESEND_API_KEY` / `EMAIL_FROM` remain an optional fallback. Without either provider, in-app
-  notifications still work and email delivery is skipped.
+  `RESEND_API_KEY` / `EMAIL_FROM` remain an optional fallback. New self-signups remain inactive
+  until the email link is confirmed; if delivery fails, configure a provider and use **Resend
+  activation email** on the sign-in page.
 
 ## Endpoints
 
-Everything except `/auth/signup`, `/auth/login`, `/health`, `/files/vehicle-images/*` needs
+Everything except `/auth/signup`, `/auth/login`, `/auth/verify-email`, `/auth/resend-verification`,
+`/health`, `/files/vehicle-images/*` needs
 `Authorization: Bearer <token>`. Full, testable list at `/docs`.
 
 | Method & path                                  | Who               | Purpose |
 | ---------------------------------------------- | ----------------- | ------- |
-| `POST /auth/signup`                            | public            | Customer sign-up (admin only while none exists) |
+| `POST /auth/signup`                            | public            | Customer sign-up (admin only while none exists); sends an activation email |
+| `GET`/`POST /auth/verify-email`                | public            | Confirm the activation link (24-hour expiry) |
+| `POST /auth/resend-verification`               | public            | Send a fresh activation link |
 | `POST /auth/login`                             | public            | `{email,password,portal?}` → `{access_token,user}`; `portal` rejects wrong-role accounts |
 | `GET /auth/me`                                 | any               | Current profile |
 | `PUT /me/age`                                  | customer          | Set age |
@@ -97,6 +102,7 @@ Everything except `/auth/signup`, `/auth/login`, `/health`, `/files/vehicle-imag
 | `POST /vehicles`, `PATCH`/`DELETE /vehicles/{id}`, `POST /vehicles/images` | admin | Fleet management |
 | `GET /bookings`                                | any (role-scoped) | Filters: `status` (`all`/one/comma list), `start_from`, `start_to`, `sort`, `limit` |
 | `POST /bookings`                               | customer          | Request a booking (price is computed server-side) |
+| `PUT /bookings/{id}/resubmit`                  | owning customer   | Edit and resubmit a rejected booking for admin review |
 | `POST /bookings/{id}/accept` `{staff_id}` / `/reject` | admin      | Decide a pending booking |
 | `POST /bookings/{id}/send-approval-email`      | admin             | Resend approval email |
 | `POST /bookings/{id}/start` / `/complete`      | assigned staff    | Start rental / finish (needs a post-rental inspection) |
@@ -110,6 +116,10 @@ Everything except `/auth/signup`, `/auth/login`, `/health`, `/files/vehicle-imag
 Bookings are returned with nested `profiles` (customer) and `vehicles` keys — deliberately the same
 JSON shape the front-ends already used, so the UI code stayed almost unchanged. What each role sees inside
 `profiles` differs (admin: ID details; staff: name + phone only; customer: no customer block).
+Customers can edit a rejected booking from **My bookings** and resubmit it; it returns to **Pending**,
+clears the previous rejection note, and sends a live admin notification. Admins can then accept it or
+reject it again with a new reason. Admins can also reopen the decision directly from the **Rejected**
+tab using **Accept again** or **Reject again**.
 
 ## Behaviour notes / decisions you may want to review
 

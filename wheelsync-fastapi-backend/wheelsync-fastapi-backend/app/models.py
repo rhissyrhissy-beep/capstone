@@ -60,6 +60,9 @@ class Profile(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)  # stored lower-case
     password_hash: Mapped[str] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    email_verification_token_hash: Mapped[str | None] = mapped_column(String(64))
+    email_verification_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     age: Mapped[int | None] = mapped_column(Integer)
     address: Mapped[str | None] = mapped_column(Text)
     role: Mapped[UserRole] = mapped_column(_enum(UserRole, "user_role"), default=UserRole.customer)

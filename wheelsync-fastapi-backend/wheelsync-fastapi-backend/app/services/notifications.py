@@ -32,7 +32,7 @@ def notify_booking_status_change(db: Session, booking: Booking, rental_address: 
         )
     elif booking.status == BookingStatus.rejected and booking.rejection_reason:
         title = "Booking needs changes"
-        body = f"Your booking was rejected. Reason: {booking.rejection_reason} Please review your details and contact Pardz Car Rental if you need to update your requirements."
+        body = f"Your booking was rejected. Reason: {booking.rejection_reason} Edit and resubmit the booking in My bookings for another review."
     else:
         title = "Booking status updated"
         body = f"Your booking is now {booking.status.value.replace('_', ' ')}."

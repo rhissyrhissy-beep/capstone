@@ -85,6 +85,16 @@ def create_booking(data: BookingCreate, user: Profile = Depends(require_customer
     return svc.create_booking(db, user, data)
 
 
+@router.put("/{booking_id}/resubmit", response_model=BookingCustomerOut)
+def resubmit_rejected_booking(
+    booking_id: str,
+    data: BookingCreate,
+    user: Profile = Depends(require_customer),
+    db: Session = Depends(get_db),
+):
+    return svc.resubmit_rejected_booking(db, parse_uuid(booking_id, "Booking"), user, data)
+
+
 @router.get("/{booking_id}")
 def get_booking(booking_id: str, user: Profile = Depends(get_current_user), db: Session = Depends(get_db)):
     booking = svc.get_booking_or_404(db, parse_uuid(booking_id, "Booking"))
@@ -111,7 +121,7 @@ def reject(booking_id: str, data: RejectIn, admin: Profile = Depends(require_adm
         send_notification_email(
             booking.customer.email,
             "Your Pardz Car Rental booking needs changes",
-            f"Your booking was rejected. Reason: {booking.rejection_reason} Please review your details and update your requirements in WheelSync.",
+            f"Your booking was rejected. Reason: {booking.rejection_reason} Please edit and resubmit the booking in My bookings for another review.",
         )
     except (EmailNotConfigured, EmailDeliveryFailed) as exc:
         logger.warning("Booking rejection email was not sent: %s", exc)

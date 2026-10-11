@@ -22,7 +22,15 @@ from app.main import app  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def clean_db():
+def clean_db(monkeypatch):
+    from app.routers import auth
+
+    app.state.verification_tokens = {}
+    monkeypatch.setattr(
+        auth,
+        "send_verification_email",
+        lambda email, token: app.state.verification_tokens.__setitem__(email, token),
+    )
     Base.metadata.drop_all(engine)
     init_db()
     yield

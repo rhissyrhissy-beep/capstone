@@ -6,12 +6,14 @@ import ThemeToggle from '../components/ThemeToggle'
 import heroImage from '../assets/hero.png'
 
 export default function Login() {
-  const { signInWithPassword } = useAuth()
+  const { signInWithPassword, resendVerification } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [notice, setNotice] = useState('')
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -21,6 +23,16 @@ export default function Login() {
     setBusy(false)
     if (error) return setError(error.message)
     navigate('/')
+  }
+
+  async function handleResend() {
+    setError('')
+    setNotice('')
+    setResending(true)
+    const { error } = await resendVerification(email)
+    setResending(false)
+    if (error) return setError(error.message)
+    setNotice('If this account needs activation, an email with a new link has been sent.')
   }
 
   return (
@@ -65,6 +77,10 @@ export default function Login() {
           </label>
           <button type="submit" disabled={busy} className="pardz-signin btn-primary py-2.5 mt-2">
             {busy ? 'Signing in…' : 'Sign in'}
+          </button>
+          {notice && <p className="text-sm" role="status" style={{ color: 'var(--success)' }}>{notice}</p>}
+          <button type="button" disabled={resending || !email.trim()} onClick={handleResend} className="text-sm" style={{ color: 'var(--nebula-3)' }}>
+            {resending ? 'Sending…' : 'Resend activation email'}
           </button>
         </form>
 

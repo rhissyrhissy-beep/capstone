@@ -219,22 +219,22 @@ export default function Bookings() {
                   <td className="py-3 px-4 align-top whitespace-nowrap font-medium">₱{Number(booking.total_amount || 0).toLocaleString()}</td>
                   <td className="py-3 px-4 align-top"><Badge status={booking.status} /></td>
                   <td className="w-[220px] py-3 px-4 align-top">
-                    {booking.status === 'pending' && (assignFor === booking.id ? (
+                    {(booking.status === 'pending' || booking.status === 'rejected') && (assignFor === booking.id ? (
                       <div className="grid min-w-40 gap-2">
                         <select value={selectedStaff} onChange={(event) => setSelectedStaff(event.target.value)} className="px-2 py-2 text-xs">
                           <option value="">Assign staff…</option>
                           {staff.map((member) => <option key={member.id} value={member.id}>{member.full_name}</option>)}
                         </select>
                         <button onClick={() => confirmAccept(booking)} disabled={!selectedStaff || booking.profiles?.verification_status !== 'verified' || busyBooking === booking.id} className="btn-primary w-full px-3 py-2 text-xs">
-                          {busyBooking === booking.id ? 'Accepting…' : 'Confirm accept'}
+                          {busyBooking === booking.id ? 'Accepting…' : booking.status === 'rejected' ? 'Confirm accept again' : 'Confirm accept'}
                         </button>
                         {booking.profiles?.verification_status !== 'verified' && <span className="text-xs" style={{ color: 'var(--warning)' }}>Verify customer first.</span>}
                         <button onClick={() => { setAssignFor(null); setSelectedStaff('') }} className="btn-ghost w-full px-3 py-2 text-xs">Cancel</button>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 gap-2">
-                        <button onClick={() => setAssignFor(booking.id)} disabled={busyBooking === booking.id} className="btn-primary flex items-center justify-center gap-1 px-2 py-2 text-xs"><Check size={14} /> Accept</button>
-                        <button onClick={() => { setRejectFor(booking); setRejectionReason('') }} disabled={busyBooking === booking.id} className="btn-ghost flex items-center justify-center gap-1 px-2 py-2 text-xs"><X size={14} /> Reject</button>
+                      <div className="grid gap-2">
+                        <button onClick={() => setAssignFor(booking.id)} disabled={busyBooking === booking.id} className="btn-primary flex w-full items-center justify-center gap-2 px-3 py-2.5 text-xs whitespace-nowrap"><Check size={14} /> {booking.status === 'rejected' ? 'Accept again' : 'Accept'}</button>
+                        <button onClick={() => { setRejectFor(booking); setRejectionReason('') }} disabled={busyBooking === booking.id} className="btn-ghost flex w-full items-center justify-center gap-2 px-3 py-2.5 text-xs whitespace-nowrap"><X size={14} /> {booking.status === 'rejected' ? 'Reject again' : 'Reject'}</button>
                       </div>
                     ))}
                     {booking.status === 'accepted' && <button onClick={() => sendApprovalEmail(booking)} disabled={busyBooking === booking.id} className="btn-ghost mt-2 flex w-full items-center justify-center gap-1.5 px-3 py-2 text-xs">{busyBooking === booking.id ? 'Sending…' : 'Resend approval email'}</button>}
@@ -250,12 +250,12 @@ export default function Bookings() {
       {rejectFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setRejectFor(null)}>
           <section role="dialog" aria-modal="true" aria-labelledby="reject-booking-title" className="card w-full max-w-lg p-5" onClick={(event) => event.stopPropagation()}>
-            <h2 id="reject-booking-title" className="font-display text-lg font-semibold">Reject booking</h2>
-            <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>Give the customer a reason and explain what they can update.</p>
+            <h2 id="reject-booking-title" className="font-display text-lg font-semibold">{rejectFor.status === 'rejected' ? 'Reject booking again' : 'Reject booking'}</h2>
+            <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>Give the customer a reason and explain what they can update. This note will replace the previous rejection note.</p>
             <label className="mt-4 flex flex-col gap-1 text-sm">Reason<textarea rows={4} value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} maxLength={2000} required placeholder="For example, please upload a clear, unexpired ID." className="px-3 py-2" /></label>
             <div className="mt-4 flex justify-end gap-2">
               <button onClick={() => setRejectFor(null)} className="btn-ghost px-4 py-2 text-sm">Cancel</button>
-              <button onClick={() => reject(rejectFor, rejectionReason.trim())} disabled={!rejectionReason.trim() || busyBooking === rejectFor.id} className="btn-primary px-4 py-2 text-sm">{busyBooking === rejectFor.id ? 'Sending…' : 'Reject and notify'}</button>
+              <button onClick={() => reject(rejectFor, rejectionReason.trim())} disabled={!rejectionReason.trim() || busyBooking === rejectFor.id} className="btn-primary px-4 py-2 text-sm">{busyBooking === rejectFor.id ? 'Sending…' : rejectFor.status === 'rejected' ? 'Reject again and notify' : 'Reject and notify'}</button>
             </div>
           </section>
         </div>

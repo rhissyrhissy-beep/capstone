@@ -80,8 +80,13 @@ def _commit_or_conflict(db: Session) -> None:
         raise
 
 
-# ----------------------------------------------------------------- create
-def create_booking(db: Session, customer: Profile, data: BookingCreate) -> Booking:
+def _validate_booking_request(
+    db: Session,
+    customer: Profile,
+    data: BookingCreate,
+    *,
+    current_booking_id: uuid.UUID | None = None,
+) -> Vehicle:
     if data.start_date > data.end_date:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The booking end date must be on or after the start date.")
     if data.start_date < today_local():
@@ -98,7 +103,24 @@ def create_booking(db: Session, customer: Profile, data: BookingCreate) -> Booki
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Vehicle not found")
     if vehicle.status == VehicleStatus.maintenance:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "This vehicle is currently under maintenance.")
+    if current_booking_id is not None:
+        clash = db.execute(
+            select(Booking.id).where(
+                Booking.id != current_booking_id,
+                Booking.vehicle_id == vehicle.id,
+                Booking.status.in_(ACTIVE),
+                Booking.start_date <= data.end_date,
+                Booking.end_date >= data.start_date,
+            ).limit(1)
+        ).first()
+        if clash:
+            raise HTTPException(status.HTTP_409_CONFLICT, OVERLAP_MESSAGE)
+    return vehicle
 
+
+# ----------------------------------------------------------------- create
+def create_booking(db: Session, customer: Profile, data: BookingCreate) -> Booking:
+    vehicle = _validate_booking_request(db, customer, data)
     booking = Booking(
         customer_id=customer.id,
         vehicle_id=vehicle.id,
@@ -121,11 +143,55 @@ def create_booking(db: Session, customer: Profile, data: BookingCreate) -> Booki
     return get_booking_or_404(db, booking.id)
 
 
+def resubmit_rejected_booking(
+    db: Session,
+    booking_id: uuid.UUID,
+    customer: Profile,
+    data: BookingCreate,
+) -> Booking:
+    booking = get_booking_or_404(db, booking_id, lock=True)
+    if booking.customer_id != customer.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Booking not found")
+    if booking.status != BookingStatus.rejected:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Only rejected bookings can be edited and resubmitted.")
+
+    vehicle = _validate_booking_request(db, customer, data, current_booking_id=booking.id)
+    booking.vehicle_id = vehicle.id
+    booking.vehicle = vehicle
+    booking.start_date = data.start_date
+    booking.end_date = data.end_date
+    booking.pickup_time = data.pickup_time
+    booking.return_time = data.return_time
+    booking.pickup_location = (data.pickup_location or "").strip() or None
+    booking.service_type = data.service_type
+    booking.distance_km = Decimal(str(data.distance_km))
+    booking.notes = data.notes
+    booking.total_amount = compute_total(vehicle, data.start_date, data.end_date, data.distance_km)
+    booking.status = BookingStatus.pending
+    booking.rejection_reason = None
+    booking.assigned_staff_id = None
+    booking.decided_by = None
+    booking.decided_at = None
+
+    admins = db.scalars(select(Profile).where(Profile.role == UserRole.admin)).all()
+    for admin in admins:
+        notes.add_notification(
+            db,
+            admin.id,
+            "Customer updated rejected booking",
+            f"{customer.full_name} edited and resubmitted rejected booking {booking.id} for "
+            f"{vehicle.make} {vehicle.model} ({data.start_date} to {data.end_date}). Review it in Pending bookings.",
+        )
+    db.commit()
+    notes.publish_after_commit(True, [admin.id for admin in admins])
+    return get_booking_or_404(db, booking.id)
+
+
 # ----------------------------------------------------------------- admin decisions
 def accept_booking(db: Session, booking_id: uuid.UUID, staff_id: uuid.UUID, admin: Profile) -> Booking:
     booking = get_booking_or_404(db, booking_id, lock=True)
-    if booking.status != BookingStatus.pending:
-        raise HTTPException(status.HTTP_409_CONFLICT, "This booking is no longer pending.")
+    if booking.status not in (BookingStatus.pending, BookingStatus.rejected):
+        raise HTTPException(status.HTTP_409_CONFLICT, "This booking is no longer pending or rejected.")
     if booking.customer.verification_status != "verified":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Verify the customer's requirements before accepting this booking.")
     staff = db.get(Profile, staff_id)
@@ -147,8 +213,8 @@ def accept_booking(db: Session, booking_id: uuid.UUID, staff_id: uuid.UUID, admi
 
 def reject_booking(db: Session, booking_id: uuid.UUID, admin: Profile, reason: str) -> Booking:
     booking = get_booking_or_404(db, booking_id, lock=True)
-    if booking.status != BookingStatus.pending:
-        raise HTTPException(status.HTTP_409_CONFLICT, "This booking is no longer pending.")
+    if booking.status not in (BookingStatus.pending, BookingStatus.rejected):
+        raise HTTPException(status.HTTP_409_CONFLICT, "This booking is no longer pending or rejected.")
     booking.status = BookingStatus.rejected
     booking.rejection_reason = reason.strip()
     booking.decided_by = admin.id

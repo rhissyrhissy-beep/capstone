@@ -15,7 +15,12 @@ def auth(token: str) -> dict:
 
 
 def signup(client, email, role="customer", name="Test User", password="secret123", phone="0917"):
-    return client.post("/auth/signup", json={"full_name": name, "email": email, "password": password, "role": role, "phone": phone})
+    response = client.post("/auth/signup", json={"full_name": name, "email": email, "password": password, "role": role, "phone": phone})
+    if response.status_code == 201:
+        token = client.app.state.verification_tokens[email.strip().lower()]
+        activation = client.post("/auth/verify-email", data={"token": token})
+        assert activation.status_code == 200, activation.text
+    return response
 
 
 def login(client, email, password="secret123", portal=None):
@@ -88,6 +93,28 @@ def test_signup_login_and_portals(client, world):
     assert login(client, "admin@x.com", portal="staff").status_code == 403
     me = client.get("/auth/me", headers=auth(world["cust"]))
     assert me.status_code == 200 and me.json()["role"] == "customer" and "password_hash" not in me.json()
+
+
+def test_signup_requires_email_activation_and_can_resend(client):
+    response = client.post("/auth/signup", json={
+        "full_name": "Pending User",
+        "email": "pending@x.com",
+        "password": "secret123",
+        "role": "customer",
+    })
+    assert response.status_code == 201
+    assert login(client, "pending@x.com").status_code == 403
+
+    first_token = client.app.state.verification_tokens["pending@x.com"]
+    assert client.get("/auth/verify-email", params={"token": first_token}).status_code == 200
+    assert client.post("/auth/resend-verification", json={"email": "PENDING@x.com"}).status_code == 200
+    assert client.post("/auth/verify-email", data={"token": first_token}).status_code == 400
+
+    second_token = client.app.state.verification_tokens["pending@x.com"]
+    assert second_token != first_token
+    assert client.post("/auth/verify-email", data={"token": second_token}).status_code == 200
+    assert login(client, "pending@x.com").status_code == 200
+    assert client.post("/auth/verify-email", data={"token": second_token}).status_code == 400
 
 
 def test_admin_signup_closes_after_first_admin(client, world):
@@ -239,6 +266,63 @@ def test_reject_and_validation(client, world):
     assert any("expired ID" in n["body"] for n in client.get("/notifications", headers=auth(world["cust"])).json())
 
 
+def test_customer_can_edit_and_resubmit_rejected_booking(client, world):
+    booking = make_booking(client, world, start=5, end=7).json()
+    booking_id = booking["id"]
+    admin = world["admin"]
+    customer = world["cust"]
+
+    rejected = client.post(
+        f"/bookings/{booking_id}/reject",
+        headers=auth(admin),
+        json={"reason": "Please change your rental dates and add a pickup location."},
+    )
+    assert rejected.status_code == 200
+
+    resubmission = {
+        "vehicle_id": world["vehicle_id"],
+        "start_date": d(8),
+        "end_date": d(9),
+        "pickup_time": "10:00",
+        "return_time": "16:00",
+        "pickup_location": "Updated pickup point",
+        "service_type": "pickup_dropoff",
+        "distance_km": 12,
+        "notes": "Updated request",
+    }
+    updated = client.put(f"/bookings/{booking_id}/resubmit", headers=auth(customer), json=resubmission)
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["status"] == "pending"
+    assert updated.json()["start_date"] == d(8)
+    assert updated.json()["pickup_location"] == "Updated pickup point"
+    assert updated.json()["rejection_reason"] is None
+
+    pending = client.get("/bookings?status=pending", headers=auth(admin)).json()
+    assert any(item["id"] == booking_id and item["notes"] == "Updated request" for item in pending)
+    admin_notes = client.get("/notifications", headers=auth(admin)).json()
+    assert any(item["title"] == "Customer updated rejected booking" and booking_id in item["body"] for item in admin_notes)
+
+    rejected_again = client.post(
+        f"/bookings/{booking_id}/reject",
+        headers=auth(admin),
+        json={"reason": "The new pickup location is outside the service area."},
+    )
+    assert rejected_again.status_code == 200
+    assert rejected_again.json()["rejection_reason"] == "The new pickup location is outside the service area."
+    customer_notes = client.get("/notifications", headers=auth(customer)).json()
+    assert any("The new pickup location is outside the service area." in item["body"] for item in customer_notes)
+    assert client.put(f"/bookings/{booking_id}/resubmit", headers=auth(admin), json=resubmission).status_code == 403
+
+    accepted = client.post(
+        f"/bookings/{booking_id}/accept",
+        headers=auth(admin),
+        json={"staff_id": world["staff_id"]},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == "accepted"
+    assert accepted.json()["rejection_reason"] is None
+
+
 def test_blacklist_flow(client, world):
     cid = customer_id(client, world["admin"])
     r = client.patch(f"/admin/customers/{cid}/blacklist", headers=auth(world["admin"]), json={"is_blacklisted": True})
@@ -285,6 +369,11 @@ def test_verification_review_and_documents(client, world):
 
     assert submit_requirements(client, cust).json()["verification_status"] == "pending"
     cid = customer_id(client, admin)
+    admin_notifications = client.get("/notifications", headers=auth(admin)).json()
+    assert any(
+        item["title"] == "Customer requirements updated" and "Carla Customer" in item["body"]
+        for item in admin_notifications
+    )
 
     assert client.post(f"/admin/customers/{cid}/verification", headers=auth(admin), json={"status": "rejected"}).status_code == 400  # reason required
     r = client.post(f"/admin/customers/{cid}/verification", headers=auth(admin), json={"status": "rejected", "reason": "ID is blurry."})
@@ -294,6 +383,17 @@ def test_verification_review_and_documents(client, world):
     # re-submit keeps old docs when files are omitted
     r = client.post("/me/verification", headers=auth(cust), data={"id_type": "Passport", "id_number": "P9", "second_id_type": "NID", "second_id_number": "N9", "address": "Updated Street"})
     assert r.status_code == 200 and r.json()["verification_status"] == "pending" and r.json()["verification_notes"] is None
+    r = client.post(
+        f"/admin/customers/{cid}/verification",
+        headers=auth(admin),
+        json={"status": "rejected", "reason": "The updated proof of address is still unclear."},
+    )
+    assert r.status_code == 200 and r.json()["verification_notes"] == "The updated proof of address is still unclear."
+    customer_notifications = client.get("/notifications", headers=auth(cust)).json()
+    assert any("The updated proof of address is still unclear." in item["body"] for item in customer_notifications)
+    r = submit_requirements(client, cust)
+    assert r.status_code == 200 and r.json()["verification_status"] == "pending"
+    assert r.json()["verification_notes"] is None
 
     docs = client.get(f"/admin/customers/{cid}/documents", headers=auth(admin)).json()
     assert all(docs[k] for k in ("primaryId", "secondId", "address", "income", "extra1", "extra2"))
@@ -406,6 +506,10 @@ def test_approval_email_uses_smtp(client, world, monkeypatch):
     monkeypatch.setattr(settings, "resend_api_key", "")
     monkeypatch.setattr(settings, "email_from", "")
     monkeypatch.setattr(email.smtplib, "SMTP", FakeSMTP)
+
+    email.send_verification_email("activate@x.com", "activation-token")
+    assert sent["message"]["Subject"] == "Activate your WheelSync account"
+    assert "http://testserver/auth/verify-email?token=activation-token" in sent["message"].get_content()
 
     verify_customer(client, world)
     bid = make_booking(client, world).json()["id"]

@@ -35,6 +35,10 @@ class LoginIn(BaseModel):
     portal: Literal["admin", "customer", "staff"] | None = None
 
 
+class EmailIn(BaseModel):
+    email: EmailStr
+
+
 class ProfileOut(ORM):
     id: uuid.UUID
     full_name: str

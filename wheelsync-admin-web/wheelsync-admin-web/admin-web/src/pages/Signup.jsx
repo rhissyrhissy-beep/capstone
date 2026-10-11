@@ -1,11 +1,10 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import ThemeToggle from '../components/ThemeToggle'
 
 export default function Signup() {
   const { signUpAdmin } = useAuth()
-  const navigate = useNavigate()
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -21,7 +20,6 @@ export default function Signup() {
     setBusy(false)
     if (error) return setError(error.message)
     setDone(true)
-    setTimeout(() => navigate('/login'), 2500)
   }
 
   return (
@@ -43,9 +41,9 @@ export default function Signup() {
 
         {done ? (
           <div className="card p-6 text-center">
-            <p style={{ color: 'var(--success)' }} className="font-medium">Account created 🎉</p>
+            <p style={{ color: 'var(--success)' }} className="font-medium">Check your email to activate your account.</p>
             <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-              You can now sign in. Redirecting…
+              Open the activation link before signing in.
             </p>
           </div>
         ) : (
